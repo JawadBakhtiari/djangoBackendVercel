@@ -1,3 +1,4 @@
+import os
 import cv2
 import json
 import uuid
@@ -11,6 +12,7 @@ import data.datastore.sessionmeta as sm
 from data.datastore.posestore import PoseStore
 from data.datastore.videostore import VideoStore
 from data.visualise import create_2D_visualisation 
+from django.conf import settings
 
 @csrf_exempt
 def user_init(request):
@@ -24,6 +26,13 @@ def user_init(request):
     uid = str(uuid.uuid4())
     new_user = User(uid, first_name, last_name)
     new_user.save()
+
+    # Write user details to log file
+    log_file_path = os.path.join(settings.BASE_DIR, 'upload_log.txt')
+    with open(log_file_path, 'a') as f:
+        f.write('\n')
+        f.write('\n')
+        f.write(f"\nPatient: {first_name} {last_name}\nuid: {uid}\n")
 
     return JsonResponse({'uid': uid}, status=201)
 
@@ -51,6 +60,12 @@ def session_init(request):
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         session.get('description')
     )
+
+    # Write session details to log file
+    log_file_path = os.path.join(settings.BASE_DIR, 'upload_log.txt')
+    with open(log_file_path, 'a') as f:
+        f.write(f"Session Name: {new_session.name}\nSession Description: {new_session.description}\nsid: {new_sid}\n")
+
     new_session.save()
 
     # NOTE -> skip for now
@@ -112,9 +127,57 @@ def video_upload(request):
     pose_store.write_to_cloud()
 
     sm.increment_clip_num(sid)
+
     print(f"\nUpload Finished\nsid: {sid}\nclip num: {clip_num}\n")
+
+    # Write message to a file
+    log_file_path = os.path.join(settings.BASE_DIR, 'upload_log.txt')
+    with open(log_file_path, 'a') as f:
+        f.write(f"===== Uploaded Clip: {clip_num} ======")
+
     return response(status=status.HTTP_200_OK)
 
+@csrf_exempt
+def show_log(request):
+    # Define the path to the log file
+    log_file_path = os.path.join(settings.BASE_DIR, 'upload_log.txt')
+
+    # Read the contents of the log file
+    try:
+        with open(log_file_path, 'r') as f:
+            log_lines = f.readlines()
+    except FileNotFoundError:
+        log_lines = []
+    
+    # Process log lines to create entries
+    log_entries = []
+    current_entry = []
+
+    for line in log_lines:
+        line = line.rstrip()  # Remove trailing whitespace
+        if line.startswith('Patient:'):
+            if current_entry:  # Add the previous entry
+                log_entries.append('\n'.join(current_entry).strip())
+            current_entry = [line]  # Start a new entry
+        else:
+            current_entry.append(line)
+    
+    # Append the last entry if there is one
+    if current_entry:
+        log_entries.append('\n'.join(current_entry).strip())
+    
+    # Keep only the latest 5 logs
+    latest_logs = log_entries[-5:]
+    
+    # Write the latest logs back to the file
+    with open(log_file_path, 'w') as f:
+        f.write('\n\n'.join(latest_logs) + '\n')
+    
+    # Prepare the content for rendering
+    log_content = '\n\n'.join(latest_logs)
+    
+    # Pass the log content to the template
+    return render(request, 'show_log.html', {'log_content': log_content})
 
 @csrf_exempt
 def visualise_2D(request):
